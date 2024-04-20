@@ -1,6 +1,6 @@
-#include <nil/crypto3/algebra/curves/pallas.hpp>
+// #include <nil/crypto3/algebra/curves/pallas.hpp>
 
-using namespace nil::crypto3::algebra::curves;
+// using namespace nil::crypto3::algebra::curves;
 // typename pallas::base_field_type::value_type pow_2(typename pallas::base_field_type::value_type a) {
 
 //     typename pallas::base_field_type::value_type res = 1;
@@ -11,13 +11,15 @@ using namespace nil::crypto3::algebra::curves;
 // }
 
 
-#include <complex>
+// #include <complex>
 #include <array>
 #include <cmath>
 #include <cassert>
 #include <limits>
 
 using namespace std;
+
+const int N = 4;
 
 /// Real
 
@@ -251,9 +253,11 @@ array<int, N> get_rot_group(int N_half, int M) {
 }
 
 template<size_t N>
-[[circuit]] array<C, N> specialFFT(const array<C, N>& a, int n, int M) {
-    assert(a.size() == n);
+[[circuit]] array<C, N> specialFFT(array<int, N> a_input, int n, int M) {
+    assert(a_input.size() == n);
     assert(is_power_of_two(n));
+
+    array<C, N> a = a_input;
 
     array<C, N> b = get_bit_reverse_array(a, n);
     array<C, N> psi_powers = get_psi_powers<N>(M);
