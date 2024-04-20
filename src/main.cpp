@@ -1,17 +1,3 @@
-// #include <nil/crypto3/algebra/curves/pallas.hpp>
-
-// using namespace nil::crypto3::algebra::curves;
-// typename pallas::base_field_type::value_type pow_2(typename pallas::base_field_type::value_type a) {
-
-//     typename pallas::base_field_type::value_type res = 1;
-//     for (int i = 0; i < 2; ++i) {
-//         res *= a;
-//     }
-//     return res;
-// }
-
-
-// #include <complex>
 #include <array>
 #include <cmath>
 #include <cassert>
@@ -19,7 +5,6 @@
 
 using namespace std;
 
-const int N = 4;
 
 /// Real
 
@@ -33,17 +18,19 @@ constexpr int MIN_VALUE = -(1 << (std::numeric_limits<int>::digits - FRACTION_BI
 class FixedPoint {
 private:
     int value;
+    FixedPoint(int value = 0) : value(value) {}
 
 public:
-    FixedPoint(int value = 0) : value(value) {}
     FixedPoint(float f) : value(static_cast<int>(f * (1 << FRACTION_BITS))) {}
+    FixedPoint(double f) : value(static_cast<int>(f * (1 << FRACTION_BITS))) {}
 
     static FixedPoint from(int x) {
-        return FixedPoint(x);
+        return FixedPoint(x * (1 << FRACTION_BITS));
     }
     static FixedPoint from(float x) {
         return FixedPoint(x);
     }
+
 
     operator float() const {
         return static_cast<float>(value) / (1 << FRACTION_BITS);
@@ -108,7 +95,7 @@ FixedPoint factorial(int n) {
     for (int i = 1; i <= n; i++) {
         result = result * i;
     }
-    return FixedPoint(result);
+    return FixedPoint::from(result);
 }
 
 typedef FixedPoint R;
@@ -121,12 +108,13 @@ public:
     FixedPoint real;
     FixedPoint imag;
 
+    cpx () : real(0.0), imag(0.0) {}
     cpx (FixedPoint real, FixedPoint imag) : real(real), imag(imag) {}
     static cpx from(int x) {
-        return cpx(R::from(x), 0);       
+        return cpx(R::from(x), 0.0);       
     }
     static cpx from(R x) {
-        return cpx(x, 0);
+        return cpx(x, 0.0);
     }
 
     // arithmetic operations
@@ -142,7 +130,7 @@ public:
     cpx operator/(const cpx& other) const {
         FixedPoint denominator = other.real * other.real + other.imag * other.imag;
         if (denominator == 0) {
-            return cpx(FixedPoint(MAX_VALUE), FixedPoint(MAX_VALUE));
+            return cpx(FixedPoint::from(MAX_VALUE), FixedPoint::from(MAX_VALUE));
         }
         cpx numerator = *this * cpx(other.real, -other.imag);
         return cpx(numerator.real / denominator, numerator.imag / denominator);
@@ -160,7 +148,7 @@ typedef cpx C;
 
 
 R sin_taylor(R x) {
-    R result (0);
+    R result (0.0);
     int sign = 1;
     for (int n=0; n<PRECISION; n++) {
         R term = R::from(sign) * x.powi(2*n+1) / factorial(2*n+1);
@@ -171,7 +159,7 @@ R sin_taylor(R x) {
 }
 
 R cos_taylor(R x) {
-    R result (0);
+    R result (0.0);
     int sign = 1;
     for (int n=0; n<PRECISION; n++) {
         R term = R::from(sign) * x.powi(2*n) / factorial(2*n);
@@ -181,6 +169,7 @@ R cos_taylor(R x) {
     return result;
 }
 
+#define M_PI 3.14159265358979323846
 C find_mth_root_of_unity(int m) {
     R ang = R::from((float)M_PI * 2 / m);
     C zeta (cos_taylor(ang), sin_taylor(ang));
@@ -252,12 +241,17 @@ array<int, N> get_rot_group(int N_half, int M) {
     return rot_group;
 }
 
-template<size_t N>
+
+const int N = 4;
 [[circuit]] array<C, N> specialFFT(array<int, N> a_input, int n, int M) {
     assert(a_input.size() == n);
+    assert(n == N);
     assert(is_power_of_two(n));
 
-    array<C, N> a = a_input;
+    array<C, N> a;
+    for (int i = 0; i < n; i++) {
+        a[i] = C::from(a_input[i]);
+    }
 
     array<C, N> b = get_bit_reverse_array(a, n);
     array<C, N> psi_powers = get_psi_powers<N>(M);
@@ -273,7 +267,7 @@ template<size_t N>
                 int idx = (rot_group[j] % lenq) * gap;
                 C u = b[i + j];
                 C v = b[i + j + lenh];
-                v *= psi_powers[idx];
+                v = v * psi_powers[idx];
                 b[i + j] = u + v;
                 b[i + j + lenh] = u - v;
             }
