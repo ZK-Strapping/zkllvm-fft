@@ -1,36 +1,190 @@
 #include <nil/crypto3/algebra/curves/pallas.hpp>
 
 using namespace nil::crypto3::algebra::curves;
-typename pallas::base_field_type::value_type pow_2(typename pallas::base_field_type::value_type a) {
+// typename pallas::base_field_type::value_type pow_2(typename pallas::base_field_type::value_type a) {
 
-    typename pallas::base_field_type::value_type res = 1;
-    for (int i = 0; i < 2; ++i) {
-        res *= a;
-    }
-    return res;
-}
-
-[[circuit]] typename pallas::base_field_type::value_type
-    field_arithmetic_example(typename pallas::base_field_type::value_type a,
-                             [[private_input]] typename pallas::base_field_type::value_type p,
-                             typename pallas::base_field_type::value_type b) {
-
-    typename pallas::base_field_type::value_type c = (a + b) * a + b * (a + b) * (a + b);
-    const typename pallas::base_field_type::value_type constant = 0x12345678901234567890_cppui255;
-    return c * c * c / (b - a) + pow_2(a) + constant + p;
-}
-
-
-
+//     typename pallas::base_field_type::value_type res = 1;
+//     for (int i = 0; i < 2; ++i) {
+//         res *= a;
+//     }
+//     return res;
+// }
 
 
 #include <complex>
-#include <vector>
+#include <array>
 #include <cmath>
 #include <cassert>
+#include <limits>
 
 using namespace std;
-typedef complex<double> C;
+
+/// Real
+
+// Define the number of fractional bits
+constexpr int FRACTION_BITS = 10; // max 13
+
+// Define the maximum and minimum values for the fixed-point number
+constexpr int MAX_VALUE = (1 << (std::numeric_limits<int>::digits - FRACTION_BITS - 1)) - 1;
+constexpr int MIN_VALUE = -(1 << (std::numeric_limits<int>::digits - FRACTION_BITS - 1));
+
+class FixedPoint {
+private:
+    int value;
+
+public:
+    FixedPoint(int value = 0) : value(value) {}
+    FixedPoint(float f) : value(static_cast<int>(f * (1 << FRACTION_BITS))) {}
+
+    static FixedPoint from(int x) {
+        return FixedPoint(x);
+    }
+    static FixedPoint from(float x) {
+        return FixedPoint(x);
+    }
+
+    operator float() const {
+        return static_cast<float>(value) / (1 << FRACTION_BITS);
+    }
+
+    FixedPoint operator+(const FixedPoint& other) const {
+        int sum = value + other.value;
+        if (sum > MAX_VALUE) {
+            sum = MAX_VALUE;
+        } else if (sum < MIN_VALUE) {
+            sum = MIN_VALUE;
+        }
+        return FixedPoint(sum);
+    }
+
+    FixedPoint operator-(const FixedPoint& other) const {
+        int diff = value - other.value;
+        if (diff > MAX_VALUE) {
+            diff = MAX_VALUE;
+        } else if (diff < MIN_VALUE) {
+            diff = MIN_VALUE;
+        }
+        return FixedPoint(diff);
+    }
+
+    FixedPoint operator*(const FixedPoint& other) const {
+        long long product = static_cast<long long>(value) * other.value;
+        product >>= FRACTION_BITS;
+        if (product > MAX_VALUE) {
+            product = MAX_VALUE;
+        } else if (product < MIN_VALUE) {
+            product = MIN_VALUE;
+        }
+        return FixedPoint(static_cast<int>(product));
+    }
+
+    FixedPoint operator/(const FixedPoint& other) const {
+        if (other.value == 0) {
+            return FixedPoint(MAX_VALUE);
+        }
+        long long dividend = static_cast<long long>(value) << FRACTION_BITS;
+        long long quotient = dividend / other.value;
+        if (quotient > MAX_VALUE) {
+            quotient = MAX_VALUE;
+        } else if (quotient < MIN_VALUE) {
+            quotient = MIN_VALUE;
+        }
+        return FixedPoint(static_cast<int>(quotient));
+    }
+
+    FixedPoint powi(int exp) {
+        FixedPoint result = FixedPoint(1);
+        for (int i = 0; i < exp; i++) {
+            result = result * *this;
+        }
+        return result;
+    }
+};
+
+FixedPoint factorial(int n) {
+    int result = 1;
+    for (int i = 1; i <= n; i++) {
+        result = result * i;
+    }
+    return FixedPoint(result);
+}
+
+typedef FixedPoint R;
+
+// Complex
+const int PRECISION = 10;
+
+class cpx {
+public:
+    FixedPoint real;
+    FixedPoint imag;
+
+    cpx (FixedPoint real, FixedPoint imag) : real(real), imag(imag) {}
+    static cpx from(int x) {
+        return cpx(R::from(x), 0);       
+    }
+    static cpx from(R x) {
+        return cpx(x, 0);
+    }
+
+    // arithmetic operations
+    cpx operator+(const cpx& other) const {
+        return cpx(real + other.real, imag + other.imag);
+    }
+    cpx operator-(const cpx& other) const {
+        return cpx(real - other.real, imag - other.imag);
+    }
+    cpx operator*(const cpx& other) const {
+        return cpx(real * other.real - imag * other.imag, real * other.imag + imag * other.real);
+    }
+    cpx operator/(const cpx& other) const {
+        FixedPoint denominator = other.real * other.real + other.imag * other.imag;
+        if (denominator == 0) {
+            return cpx(FixedPoint(MAX_VALUE), FixedPoint(MAX_VALUE));
+        }
+        cpx numerator = *this * cpx(other.real, -other.imag);
+        return cpx(numerator.real / denominator, numerator.imag / denominator);
+    }
+
+    cpx powi(int exp) {
+        cpx result = cpx::from(1);
+        for (int i = 0; i < exp; i++) {
+            result = result * *this;
+        }
+        return result;
+    }
+};
+typedef cpx C;
+
+
+R sin_taylor(R x) {
+    R result (0);
+    int sign = 1;
+    for (int n=0; n<PRECISION; n++) {
+        R term = R::from(sign) * x.powi(2*n+1) / factorial(2*n+1);
+        result = result + term;
+        sign *= -1;
+    }
+    return result;
+}
+
+R cos_taylor(R x) {
+    R result (0);
+    int sign = 1;
+    for (int n=0; n<PRECISION; n++) {
+        R term = R::from(sign) * x.powi(2*n) / factorial(2*n);
+        result = result + term;
+        sign *= -1;
+    }
+    return result;
+}
+
+C find_mth_root_of_unity(int m) {
+    R ang = R::from((float)M_PI * 2 / m);
+    C zeta (cos_taylor(ang), sin_taylor(ang));
+    return zeta;
+}
+
 
 bool is_power_of_two(int n) {
     return (n & (n - 1)) == 0;
@@ -55,10 +209,11 @@ int bit_reverse_value(int x, int n) {
     return r;
 }
 
-vector<C> get_bit_reverse_array(const vector<C>& a, int n) {
+template<size_t N>
+array<C, N> get_bit_reverse_array(const array<C, N>& a, int n) {
     assert(is_power_of_two(n));
 
-    vector<C> r(n, C(0));
+    array<C, N> r = {};
     for (int i = 0; i < n; i++) {
         int bit_reverse_i = bit_reverse_value(i, number_of_bits(n));
         r[bit_reverse_i] = a[i];
@@ -67,28 +222,27 @@ vector<C> get_bit_reverse_array(const vector<C>& a, int n) {
     return r;
 }
 
-C find_mth_root_of_unity(int m) {
-    C zeta = exp(C(0, 2 * M_PI / m));
-    return zeta;
-}
 
-vector<C> get_psi_powers(int m) {
+
+template<size_t N>
+array<C, N> get_psi_powers(int m) {
     // m^th primitive root of unity
     C psi = find_mth_root_of_unity(m);
     // powers of m^th primitive root of unity
-    vector<C> psi_powers(m + 1);
+    array<C, N> psi_powers = {};
     for (int i = 0; i <= m; i++) {
-        psi_powers[i] = pow(psi, i);
+        psi_powers[i] = psi.powi(i);
     }
 
     return psi_powers;
 }
 
-vector<int> get_rot_group(int N_half, int M) {
+template<size_t N>
+array<int, N> get_rot_group(int N_half, int M) {
     int p = 1;
-    vector<int> rot_group;
+    array<int, N> rot_group = {};
     for (int i = 0; i < N_half; i++) {
-        rot_group.push_back(p);
+        rot_group[i] = p;
         p *= 5;
         p %= M;
     }
@@ -96,13 +250,14 @@ vector<int> get_rot_group(int N_half, int M) {
     return rot_group;
 }
 
-vector<C> specialFFT(const vector<C>& a, int n, int M) {
+template<size_t N>
+[[circuit]] array<C, N> specialFFT(const array<C, N>& a, int n, int M) {
     assert(a.size() == n);
     assert(is_power_of_two(n));
 
-    vector<C> b = get_bit_reverse_array(a, n);
-    vector<C> psi_powers = get_psi_powers(M);
-    vector<int> rot_group = get_rot_group(M >> 2, M);
+    array<C, N> b = get_bit_reverse_array(a, n);
+    array<C, N> psi_powers = get_psi_powers<N>(M);
+    array<int, N> rot_group = get_rot_group<N>(M >> 2, M);
 
     int length_n = 2;
     while (length_n <= n) {
@@ -125,15 +280,16 @@ vector<C> specialFFT(const vector<C>& a, int n, int M) {
     return b;
 }
 
-vector<C> specialIFFT(const vector<C>& a, int n, int M) {
+template<size_t N>
+array<C, N> specialIFFT(const array<C, N>& a, int n, int M) {
     assert(a.size() == n);
     assert(is_power_of_two(n));
 
-    vector<C> b = a;
+    array<C, N> b = a;
 
     int length_n = n;
-    vector<C> psi_powers = get_psi_powers(M);
-    vector<int> rot_group = get_rot_group(M >> 2, M);
+    array<C, N> psi_powers = get_psi_powers<N>(M);
+    array<int, N> rot_group = get_rot_group<N>(M >> 2, M);
 
     while (length_n >= 1) {
         for (int i = 0; i < n; i += length_n) {
