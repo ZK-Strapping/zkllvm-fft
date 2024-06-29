@@ -12,7 +12,26 @@ typedef nil::crypto3::algebra::curves::pallas::base_field_type::value_type Fr;
 const int N = 4;
 const int number_of_bits = 2;
 
-/// Real
+/// Integer
+int sign(int64_t x) {
+    return (x >= 0) - (x < 0);
+}
+
+uint64_t abs_int(int64_t x) {
+    return x * sign(x);
+}
+
+int64_t div_int(int64_t x, int64_t y) {
+    int64_t res = abs_int(x) / abs_int(y);
+    return sign(x * y) * res;
+}
+
+/// if condition is true, return a, else return b
+int mux(int cond, int a, int b) {
+    return (cond * a) + ((1 - cond) * b);
+}
+
+/// Real number (Fixed-point)
 
 // Define the number of fractional bits
 const int FRACTION_BITS = 10; // max 13
@@ -21,24 +40,23 @@ const int FRACTION_BITS = 10; // max 13
 const int MAX_VALUE = (1 << (32 - FRACTION_BITS - 1)) - 1;
 const int MIN_VALUE = -(1 << (32 - FRACTION_BITS - 1));
 
-int sign(int x) {
-    return (x >= 0) - (x < 0);
-}
-
-int divint(int x, int y) {
-    return sign(x * y) * (uint32_t)x / (uint32_t)y;
-}
-
-class FixedPoint {
-private:
-public:
+// TODO: typedef int로 대체
+struct FixedPoint {
     int value;
-    
-    FixedPoint(int value = 0, bool value_alloc = 0) : value((value_alloc ? value : value * (1 << FRACTION_BITS))) {}
-    static FixedPoint from(int x) {
-        return FixedPoint(x);
-    }
+};
 
+FixedPoint fp_from(int x) {
+    FixedPoint res;
+    res.value = x * (1 << FRACTION_BITS);
+    return res;
+}
+
+FixedPoint fp_from_direct(int x) {
+    FixedPoint res;
+    res.value = x;
+    return res;
+}
+ 
     // float not supported in zk llvm
     // FixedPoint(float f) : value(static_cast<int>(f * (1 << FRACTION_BITS))) {}
     // FixedPoint(double f) : value(static_cast<int>(f * (1 << FRACTION_BITS))) {}
@@ -49,136 +67,154 @@ public:
     //     return static_cast<float>(value) / (1 << FRACTION_BITS);
     // }
 
-    operator int() const {
-        return divint(value, (1 << FRACTION_BITS));
-    }
-
-    FixedPoint operator+(const FixedPoint& other) const {
-        int sum = value + other.value;
-        if (sum > MAX_VALUE) {
-            sum = MAX_VALUE;
-        } else if (sum < MIN_VALUE) {
-            sum = MIN_VALUE;
-        }
-        return FixedPoint(sum, 1);
-    }
-
-    FixedPoint operator-(const FixedPoint& other) const {
-        int diff = value - other.value;
-        if (diff > MAX_VALUE) {
-            diff = MAX_VALUE;
-        } else if (diff < MIN_VALUE) {
-            diff = MIN_VALUE;
-        }
-        return FixedPoint(diff, 1);
-    }
-
-    FixedPoint operator*(const FixedPoint& other) const {
-        long long product = static_cast<long long>(value) * other.value;
-        product >>= FRACTION_BITS;
-        if (product > MAX_VALUE) {
-            product = MAX_VALUE;
-        } else if (product < MIN_VALUE) {
-            product = MIN_VALUE;
-        }
-        return FixedPoint(static_cast<int>(product), 1);
-    }
-
-    FixedPoint operator/(const FixedPoint& other) const {
-        if (other.value == 0) {
-            return FixedPoint(MAX_VALUE, 1);
-        }
-        int dividend = static_cast<int>(value) << FRACTION_BITS;
-        if (dividend < value) {
-            throw "Divide Overflow";
-        }
-
-        int quotient = divint(dividend, other.value);
-        if (quotient > MAX_VALUE) {
-            quotient = MAX_VALUE;
-        } else if (quotient < MIN_VALUE) {
-            quotient = MIN_VALUE;
-        }
-        return FixedPoint(static_cast<int>(quotient), 1);
-    }
-
-    FixedPoint powi(int exp) {
-        FixedPoint result = FixedPoint(1);
-        for (int i = 0; i < 4096; i++) {
-            result = result * (i < exp ? *this : FixedPoint(1));
-        }
-        return result;
-    }
-};
-
-FixedPoint from2fp(int x) {
-    return FixedPoint(x * (1 << FRACTION_BITS));
+int fp_to_int(FixedPoint x) {
+    return div_int(x.value, (1 << FRACTION_BITS));
 }
 
-int fp2int(FixedPoint x) {
-    return divint(x.value, (1 << FRACTION_BITS));
+FixedPoint fp_add(FixedPoint self, FixedPoint other) {
+    int sum = self.value + other.value;
+    // if (sum > MAX_VALUE) {
+    //     sum = MAX_VALUE;
+    // } else if (sum < MIN_VALUE) {
+    //     sum = MIN_VALUE;
+    // }
+    return fp_from_direct(sum);
+}
+
+FixedPoint fp_sub(FixedPoint self, FixedPoint other) {
+    int diff = self.value - other.value;
+    // if (diff > MAX_VALUE) {
+    //     diff = MAX_VALUE;
+    // } else if (diff < MIN_VALUE) {
+    //     diff = MIN_VALUE;
+    // }
+    return fp_from_direct(diff);
+}
+
+FixedPoint fp_mul(FixedPoint self, FixedPoint other) {
+    int64_t product = static_cast<int64_t>(self.value) * other.value;
+    product >>= FRACTION_BITS;
+    // if (product > MAX_VALUE) {
+    //     product = MAX_VALUE;
+    // } else if (product < MIN_VALUE) {
+    //     product = MIN_VALUE;
+    // }
+    return fp_from_direct(static_cast<int>(product));
+}
+
+FixedPoint fp_div(FixedPoint self, FixedPoint other) {
+    if (other.value == 0) {
+        throw "Divide by zero";
+        return fp_from_direct(MAX_VALUE);
+    }
+    int64_t dividend = static_cast<int64_t>(self.value) << FRACTION_BITS;
+    // if (dividend < self.value) {
+    //     throw "Divide Overflow";
+    // }
+
+    int quotient = div_int(dividend, other.value);
+    // if (quotient > MAX_VALUE) {
+    //     quotient = MAX_VALUE;
+    // } else if (quotient < MIN_VALUE) {
+    //     quotient = MIN_VALUE;
+    // }
+    return fp_from_direct(quotient);
+}
+
+FixedPoint mux_fp(int cond, FixedPoint a, FixedPoint b) {
+    return fp_from_direct(mux(cond, a.value, b.value));
+}
+
+FixedPoint fp_powi(FixedPoint self, int exp) {
+    FixedPoint res = fp_from(1);
+    FixedPoint id = fp_from(1);
+
+    for (int i = 0; i < 4096; i++) {
+        FixedPoint term = mux_fp(i < exp, self, id);
+        res = fp_mul(res, term);
+    }
+    return res;
 }
 
 // factorial list
 array<int, 11> factorial_list = {1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880,
                                           3628800, };
 
-FixedPoint factorial(int n) {
-    return FixedPoint::from(factorial_list[n]);
+FixedPoint factorial(size_t n) {
+    return fp_from(factorial_list[n]);
+}
+
+
+// # of iteration for taylor series 
+const int PRECISION = 10;
+
+// Complex number
+struct cpx {
+    FixedPoint real;
+    FixedPoint imag;
+};
+
+cpx cpx_from(int real, int imag) {
+    cpx res;
+    res.real = fp_from(real);
+    res.imag = fp_from(imag);
+    return res;   
+}
+
+cpx cpx_from_fp(FixedPoint real, FixedPoint imag) {
+    cpx res;
+    res.real = real;
+    res.imag = imag;
+    return res;
+}
+
+// arithmetic operations
+cpx cpx_add(cpx self, cpx other) {
+    return cpx_from_fp(fp_add(self.real, other.real), fp_add(self.imag, other.imag));
+}
+
+cpx cpx_sub(cpx self, cpx other) {
+    return cpx_from_fp(fp_sub(self.real, other.real), fp_sub(self.imag, other.imag));
+}
+
+cpx cpx_mul(cpx self, cpx other) {
+    return cpx_from_fp(fp_sub(fp_mul(self.real, other.real), fp_mul(self.imag, other.imag)), 
+                       fp_add(fp_mul(self.real, other.imag), fp_mul(self.imag, other.real)));
+}
+
+cpx cpx_div(cpx self, cpx other) {
+    FixedPoint denominator = fp_add(fp_mul(other.real, other.real), fp_mul(other.imag, other.imag));
+    if (fp_to_int(denominator) == 0) {
+        throw "Division by zero";
+        return cpx_from(MAX_VALUE, MAX_VALUE);
+    }
+
+    // (a+bi)(c-di) = (ac+bd) + (bc-ad)i
+    FixedPoint real = fp_add(fp_mul(self.real, other.real), fp_mul(self.imag, other.imag));
+    FixedPoint imag = fp_sub(fp_mul(self.imag, other.real), fp_mul(self.real, other.imag));
+    return cpx_from_fp(fp_div(real, denominator), fp_div(imag, denominator));
+}
+
+cpx mux_cpx(int cond, cpx a, cpx b) {
+    return cpx_from_fp(mux_fp(cond, a.real, b.real), mux_fp(cond, a.imag, b.imag));
+}
+
+cpx cpx_powi(cpx self, int exp) {
+    cpx res = cpx_from(1, 0);
+    cpx id = cpx_from(1, 0);
+
+    for (int i = 0; i < 4096; i++) {
+        cpx term = mux_cpx(i < exp, self, id);
+        res = cpx_mul(res, term);
+    }
+    return res;
 }
 
 // typedef FixedPoint R;
 #define R FixedPoint
-
-// Complex
-const int PRECISION = 10;
-
-class cpx {
-public:
-    FixedPoint real;
-    FixedPoint imag;
-
-    cpx () : real(0.0), imag(0.0) {}
-    cpx (FixedPoint real, FixedPoint imag) : real(real), imag(imag) {}
-    
-    // arithmetic operations
-    cpx operator+(const cpx& other) const {
-        return cpx(real + other.real, imag + other.imag);
-    }
-    cpx operator-(const cpx& other) const {
-        return cpx(real - other.real, imag - other.imag);
-    }
-    cpx operator*(const cpx& other) const {
-        return cpx(real * other.real - imag * other.imag, real * other.imag + imag * other.real);
-    }
-    cpx operator/(const cpx& other) const {
-        FixedPoint denominator = other.real * other.real + other.imag * other.imag;
-        if (fp2int(denominator) == 0) {
-            throw "Division by zero";
-            return cpx(MAX_VALUE, MAX_VALUE);
-        }
-        cpx numerator = *this * cpx(other.real, R(0)-other.imag);
-        return cpx(numerator.real / denominator, numerator.imag / denominator);
-    }
-
-    cpx powi(int exp) {
-        cpx result = cpx(1, 0);
-        for (int i = 0; i < exp; i++) {
-            result = result * (i < exp ? *this : cpx(1, 0));
-        }
-        return result;
-    }
-};
 #define C cpx
 
-cpx from2cpx(int x) {
-    return cpx(from2fp(x), 0.0);       
-}
-cpx from2cpx(R x) {
-    return cpx(x, 0.0);
-}
-
-
+/*
 R sin_taylor(R x) {
     R result (0.0);
     int sign = 1;
@@ -201,10 +237,10 @@ R cos_taylor(R x) {
     return result;
 }
 
-#define M_PI 3.14159265358979323846
+// #define M_PI 3.14159265358979323846
 C find_mth_root_of_unity(int m) {
-    R ang = R::from((float)M_PI * 2 / m);
-    // R ang = R::from(4 * 2 / m);
+    // R ang = R::from((float)M_PI * 2 / m);
+    R ang = R::from(4 * 2 / m);
     C zeta (cos_taylor(ang), sin_taylor(ang));
     return zeta;
 }
@@ -212,6 +248,7 @@ C find_mth_root_of_unity(int m) {
 bool is_power_of_two(int n) {
     return (n & (n - 1)) == 0;
 }
+*/
 
 // int number_of_bits(int n) {
 //     int count = 0;
@@ -221,7 +258,7 @@ bool is_power_of_two(int n) {
 //     }
 //     return count;
 // }
-
+/*
 int bit_reverse_value(int x) {
     int r = 0;
     for (int i = 0; i < number_of_bits; i++) {
@@ -233,7 +270,7 @@ int bit_reverse_value(int x) {
 }
 
 template<size_t N>
-array<C, N> get_bit_reverse_array(const array<C, N>& a) {
+array<C, N> get_bit_reverse_array(const array<C, N> a) {
     __builtin_assigner_exit_check(is_power_of_two(N));
 
     array<C, N> r = {};
@@ -244,9 +281,9 @@ array<C, N> get_bit_reverse_array(const array<C, N>& a) {
 
     return r;
 }
+*/
 
-
-
+/*
 template<size_t N>
 array<C, N> get_psi_powers(int m) {
     // m^th primitive root of unity
@@ -271,9 +308,9 @@ array<int, N> get_rot_group(int N_half, int M) {
     }
 
     return rot_group;
-}
+}*/
 
-
+/*
 template <size_t N>
 // [[circuit]] array<C, N> specialFFT([[private_input]] array<int, N> a_input, int n, int M) {
 array<C, N> specialFFT(array<C, N> a, int n, int M) {
@@ -303,7 +340,7 @@ array<C, N> specialFFT(array<C, N> a, int n, int M) {
 }
 
 template<size_t N>
-array<C, N> specialIFFT(const array<C, N>& a, int n, int M) {
+array<C, N> specialIFFT(const array<C, N> a, int n, int M) {
     __builtin_assigner_exit_check(a.size() == n);
     __builtin_assigner_exit_check(is_power_of_two(n));
 
@@ -338,17 +375,17 @@ array<C, N> specialIFFT(const array<C, N>& a, int n, int M) {
     }
 
     return b;
-}
+} */
 
 
 /// Circuit
 #include <iostream>
 
-array<int, 2*N> complex2int(array<C, N>& a, int n) {
+array<int, 2*N> complex2int(array<C, N> a, int n) {
     array<int, 2*N> r = {};
     for (int i = 0; i < N; i++) {
-        // r[2*i] = fp2int(a[i].real);
-        // r[2*i+1] = fp2int(a[i].imag);
+        r[2*i] = fp_to_int(a[i].real);
+        r[2*i+1] = fp_to_int(a[i].imag);
         // std::cout << r[2*i] << " " << r[2*i+1] << std::endl;
     }
 
@@ -365,7 +402,7 @@ array<int, 2*N> complex2int(array<C, N>& a, int n) {
 
     array<cpx, N> a = {};
     for (int i = 0; i < N; i++) {
-        a[i] = from2cpx(a_input[i]);
+        a[i] = cpx_from(a_input[i], 0);
         // std::cout << a[i].real.value << " " << a[i].imag.value << std::endl;
     }
 
