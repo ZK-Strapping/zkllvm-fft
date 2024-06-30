@@ -214,7 +214,7 @@ cpx cpx_powi(cpx self, int exp) {
 #define R FixedPoint
 #define C cpx
 
-/*
+
 R sin_taylor(R x) {
     R result (0.0);
     int sign = 1;
@@ -258,7 +258,7 @@ bool is_power_of_two(int n) {
 //     }
 //     return count;
 // }
-/*
+
 int bit_reverse_value(int x) {
     int r = 0;
     for (int i = 0; i < number_of_bits; i++) {
@@ -283,7 +283,7 @@ array<C, N> get_bit_reverse_array(const array<C, N> a) {
 }
 */
 
-/*
+
 template<size_t N>
 array<C, N> get_psi_powers(int m) {
     // m^th primitive root of unity
@@ -308,9 +308,9 @@ array<int, N> get_rot_group(int N_half, int M) {
     }
 
     return rot_group;
-}*/
+}
 
-/*
+
 template <size_t N>
 // [[circuit]] array<C, N> specialFFT([[private_input]] array<int, N> a_input, int n, int M) {
 array<C, N> specialFFT(array<C, N> a, int n, int M) {
@@ -375,7 +375,7 @@ array<C, N> specialIFFT(const array<C, N> a, int n, int M) {
     }
 
     return b;
-} */
+}
 
 
 /// Circuit
@@ -406,9 +406,8 @@ array<int, 2*N> complex2int(array<C, N> a, int n) {
         // std::cout << a[i].real.value << " " << a[i].imag.value << std::endl;
     }
 
-    array<int, 2*N> output = complex2int(a, n);
-    // array<C, N> res = specialFFT<N>(a, n, M);
-    // array<int, 2*N> output = complex2int<N>(res);
+    array<C, N> res = specialFFT<N>(a, n, M);
+    array<int, 2*N> output = complex2int<N>(res, n);
 
     return output;
 }
