@@ -6,10 +6,11 @@
 
 using namespace std;
 
-// N
-const int N = 4;
-const int M = 8;
-const int number_of_bits = 2;
+// const parameters
+constexpr int N = 4;
+constexpr int M = 16;
+constexpr int number_of_bits = 2; // log2(N)
+constexpr int N_half = M / 4;
 
 /// Integer
 int sign(int64_t x) {
@@ -39,19 +40,28 @@ const int FRACTION_BITS = 10; // max 13
 const int MAX_VALUE = (1 << (32 - FRACTION_BITS - 1)) - 1;
 const int MIN_VALUE = -(1 << (32 - FRACTION_BITS - 1));
 
-// TODO: typedef int로 대체
 struct FixedPoint {
-    int value;
+    int sign;
+    uint32_t value;
 };
 
 FixedPoint fp_from(int x) {
     FixedPoint res;
-    res.value = x * (1 << FRACTION_BITS);
+    res.sign = sign(x);
+    res.value = abs_int(x) * (1 << FRACTION_BITS);
     return res;
 }
 
 FixedPoint fp_from_direct(int x) {
     FixedPoint res;
+    res.sign = sign(x);
+    res.value = abs_int(x);
+    return res;
+}
+
+FixedPoint fp_from_direct(int sign, uint32_t x) {
+    FixedPoint res;
+    res.sign = sign;
     res.value = x;
     return res;
 }
@@ -67,11 +77,12 @@ FixedPoint fp_from_direct(int x) {
     // }
 
 int fp_to_int(FixedPoint x) {
-    return div_int(x.value, (1 << FRACTION_BITS));
+    // return div_int(x.value, (1 << FRACTION_BITS));
+    return x.sign * (x.value >> FRACTION_BITS);
 }
 
 FixedPoint fp_add(FixedPoint self, FixedPoint other) {
-    int sum = self.value + other.value;
+    int sum = self.sign * (int)self.value + other.sign * (int)other.value;
     // if (sum > MAX_VALUE) {
     //     sum = MAX_VALUE;
     // } else if (sum < MIN_VALUE) {
@@ -81,7 +92,7 @@ FixedPoint fp_add(FixedPoint self, FixedPoint other) {
 }
 
 FixedPoint fp_sub(FixedPoint self, FixedPoint other) {
-    int diff = self.value - other.value;
+    int diff = self.sign * (int)self.value - other.sign * (int)other.value;
     // if (diff > MAX_VALUE) {
     //     diff = MAX_VALUE;
     // } else if (diff < MIN_VALUE) {
@@ -91,37 +102,34 @@ FixedPoint fp_sub(FixedPoint self, FixedPoint other) {
 }
 
 FixedPoint fp_mul(FixedPoint self, FixedPoint other) {
-    int64_t product = static_cast<int64_t>(self.value) * other.value;
+    uint64_t product = static_cast<uint64_t>(self.value) * other.value;
     product >>= FRACTION_BITS;
     // if (product > MAX_VALUE) {
     //     product = MAX_VALUE;
     // } else if (product < MIN_VALUE) {
     //     product = MIN_VALUE;
     // }
-    return fp_from_direct(static_cast<int>(product));
+    return fp_from_direct(self.sign * other.sign, static_cast<uint32_t>(product));
 }
 
 FixedPoint fp_div(FixedPoint self, FixedPoint other) {
-    if (other.value == 0) {
-        throw "Divide by zero";
-        return fp_from_direct(MAX_VALUE);
-    }
-    int64_t dividend = static_cast<int64_t>(self.value) << FRACTION_BITS;
-    // if (dividend < self.value) {
-    //     throw "Divide Overflow";
+    // if (other.value == 0) {
+    //     // throw "Divide by zero";
+    //     return fp_from_direct(MAX_VALUE);
     // }
-
-    int quotient = div_int(dividend, other.value);
+    uint64_t dividend = static_cast<uint64_t>(self.value) << FRACTION_BITS;
+    uint64_t quotient = dividend / other.value;
     // if (quotient > MAX_VALUE) {
     //     quotient = MAX_VALUE;
     // } else if (quotient < MIN_VALUE) {
     //     quotient = MIN_VALUE;
     // }
-    return fp_from_direct(quotient);
+    return fp_from_direct(self.sign * other.sign, static_cast<uint32_t>(quotient));
 }
 
 FixedPoint mux_fp(int cond, FixedPoint a, FixedPoint b) {
-    return fp_from_direct(mux(cond, a.value, b.value));
+    // return fp_from_direct(mux(cond, a.sign, b.sign), mux(cond, a.value, b.value));
+    return cond ? a : b;
 }
 
 FixedPoint fp_powi(FixedPoint self, int exp) {
@@ -183,10 +191,10 @@ cpx cpx_mul(cpx self, cpx other) {
 
 cpx cpx_div(cpx self, cpx other) {
     FixedPoint denominator = fp_add(fp_mul(other.real, other.real), fp_mul(other.imag, other.imag));
-    if (fp_to_int(denominator) == 0) {
-        throw "Division by zero";
-        return cpx_from(MAX_VALUE, MAX_VALUE);
-    }
+    // if (fp_to_int(denominator) == 0) {
+    //     // throw "Division by zero";
+    //     return cpx_from(MAX_VALUE, MAX_VALUE);
+    // }
 
     // (a+bi)(c-di) = (ac+bd) + (bc-ad)i
     FixedPoint real = fp_add(fp_mul(self.real, other.real), fp_mul(self.imag, other.imag));
@@ -195,7 +203,8 @@ cpx cpx_div(cpx self, cpx other) {
 }
 
 cpx mux_cpx(int cond, cpx a, cpx b) {
-    return cpx_from_fp(mux_fp(cond, a.real, b.real), mux_fp(cond, a.imag, b.imag));
+    // return cpx_from_fp(mux_fp(cond, a.real, b.real), mux_fp(cond, a.imag, b.imag));
+    return cond ? a : b;
 }
 
 cpx cpx_powi(cpx self, int exp) {
@@ -215,33 +224,38 @@ cpx cpx_powi(cpx self, int exp) {
 
 
 R sin_taylor(R x) {
-    R result = fp_from_direct(0);
-    int sign = 1;
-    for (int n=0; n<PRECISION; n++) {
-        R term = fp_mul(fp_from(sign), fp_powi(x, 2*n+1));
-        term = fp_div(term, factorial(2*n+1));
+    R result = x;
+    R term = x;
+    for (int n = 1; n <= PRECISION; n++) {
+        term = fp_mul(term, fp_from(-1));
+        term = fp_mul(term, fp_mul(x, x));
+        term = fp_div(term, fp_from((2*n)*(2*n+1)));
+        
         result = fp_add(result, term);
-        sign *= -1;
     }
     return result;
 }
 
 R cos_taylor(R x) {
-    R result = fp_from_direct(0);
-    int sign = 1;
-    for (int n=0; n<PRECISION; n++) {
-        R term = fp_mul(fp_from(sign), fp_powi(x, 2*n));
-        term = fp_div(term, factorial(2*n));
+    R result = fp_from(1);
+    R term = fp_from(1);
+    for (int n = 1; n <= PRECISION; n++) {
+        term = fp_mul(term, fp_from(-1));
+        term = fp_mul(term, fp_mul(x, x));
+        term = fp_div(term, fp_from((2*n-1)*(2*n)));
+        
         result = fp_add(result, term);
-        sign *= -1;
     }
     return result;
 }
 
-// #define M_PI 3.14159265358979323846
+#define M_PI 3.14159265358979323846
+constexpr uint32_t FP_PI = 2 * M_PI * (1 << FRACTION_BITS);
+const R TWO_PI = fp_from_direct(1, FP_PI);
+
 C find_mth_root_of_unity(int m) { // m = 8
     // R ang = R::from((float)M_PI * 2 / m);
-    R ang = fp_from(1);
+    R ang = fp_div(TWO_PI, fp_from(m));
     C zeta = cpx_from_fp(cos_taylor(ang), sin_taylor(ang));
     return zeta;
 }
@@ -263,7 +277,7 @@ int bit_reverse_value(int x) {
     int r = 0;
     for (int i = 0; i < number_of_bits; i++) {
         r = r * 2;
-        r |= x & 1;
+        r += x & 1;
         x = div_int(x, 2);
     }
     return r;
@@ -282,7 +296,7 @@ array<C, N> get_bit_reverse_array(const array<C, N> a) {
 }
 
 
-template<size_t N>
+// template<size_t N>
 array<C, M + 1> get_psi_powers() {
     // m^th primitive root of unity
     C psi = find_mth_root_of_unity(M);
@@ -296,7 +310,7 @@ array<C, M + 1> get_psi_powers() {
 }
 
 template<size_t N>
-array<int, N> get_rot_group(int N_half, int M) {
+array<int, N> get_rot_group() {
     int p = 1;
     array<int, N> rot_group = {};
     for (int i = 0; i < N_half; i++) {
@@ -312,26 +326,35 @@ array<int, N> get_rot_group(int N_half, int M) {
 template <size_t N>
 // [[circuit]] array<C, N> specialFFT([[private_input]] array<int, N> a_input, int n, int M) {
 array<C, N> specialFFT(array<C, N> a) {
-    cout << "pass" << "\n";
+    // cout << "pass" << "\n";
     array<C, N> b = get_bit_reverse_array(a);
-    cout << "pass" << "\n";
-    array<C, M + 1> psi_powers = get_psi_powers<M + 1>(); // 9, 8
-    cout << "pass" << "\n";
-    array<int, N> rot_group = get_rot_group<N>(M >> 2, M); // 2, 8
-    cout << "pass" << "\n";
+    // cout << "pass" << "\n";
+    array<C, M + 1> psi_powers = get_psi_powers(); // 9, 8
+    // cout << "pass" << "\n";
+    array<int, N> rot_group = get_rot_group<N>(); // 2, 8
+    // cout << "pass" << "\n";
+    
     int length_n = 2;
-    while (length_n <= N) {
-        for (int i = 0; i < N; i += length_n) {
+    // while (length_n <= N) {
+    for (int l = 0; l < number_of_bits; l++) {
+        // for (int i = 0; i < N; i += length_n) {
+        for (int i = 0; i < N; i++) {
             int lenh = length_n >> 1;
             int lenq = length_n << 2;
-            int gap = div_int(M, lenq);
-            for (int j = 0; j < lenh; j++) {
+            int gap = (uint32_t)M / lenq;
+            // for (int j = 0; j < lenh; j++) {
+            for (int j = 0; j < N / 2; j++) {
+                int cond = (i % length_n == 0) && (j < lenh);
+                // int index1 = cond ? i + j : 0;
+                int index1 = cond * (i + j);
+                int index2 = cond * (i + j + lenh);
+
                 int idx = (rot_group[j] % lenq) * gap;
-                C u = b[i + j];
-                C v = b[i + j + lenh];
+                C u = b[index1];
+                C v = b[index2];
                 v = cpx_mul(v, psi_powers[idx]);
-                b[i + j] = cpx_add(u, v);
-                b[i + j + lenh] = cpx_sub(u, v);
+                b[index1] = cond ? cpx_add(u, v) : b[index1];
+                b[index2] = cond ? cpx_sub(u, v) : b[index2];
             }
         }
         length_n *= 2;
@@ -339,7 +362,7 @@ array<C, N> specialFFT(array<C, N> a) {
 
     return b;
 }
-
+/*
 template<size_t N>
 array<C, N> specialIFFT(const array<C, N> a) {
     // __builtin_assigner_exit_check(a.size() == n);
@@ -348,12 +371,13 @@ array<C, N> specialIFFT(const array<C, N> a) {
     array<C, N> b = a;
 
     int length_n = N;
-    array<C, N> psi_powers = get_psi_powers<N>(M);
-    array<int, N> rot_group = get_rot_group<N>(M >> 2, M);
+    array<C, M+1> psi_powers = get_psi_powers();
+    array<int, N> rot_group = get_rot_group<N>();
 
-    int cnt = 0;
-    while (length_n >= 1) {
-        cnt++;
+    // int cnt = 0;
+    // while (length_n >= 1) {
+    for (int l = 0; l <= number_of_bits; l++) { // TODO: check why # iterations is one more than FFT
+        // cnt++;
         for (int i = 0; i < N; i += length_n) {
             int lenh = length_n >> 1;
             int lenq = length_n << 2;
@@ -369,7 +393,7 @@ array<C, N> specialIFFT(const array<C, N> a) {
         }
         length_n >>= 1;
     }
-    cout << cnt << "\n";
+    // cout << cnt << "\n";
 
     b = get_bit_reverse_array(b);
 
@@ -380,11 +404,9 @@ array<C, N> specialIFFT(const array<C, N> a) {
 
     return b;
 }
-
+*/
 
 /// Circuit
-#include <iostream>
-
 template<size_t N>
 array<int, 8> complex2int(array<C, N> a) { // N * 2 == 8
     array<int, N*2> r = {};
@@ -397,12 +419,13 @@ array<int, 8> complex2int(array<C, N> a) { // N * 2 == 8
     return r;
 }
 
-[[circuit]] array<int, 2*N> main_circuit(int n) {
+[[circuit]] array<int, 2*N> main_circuit(int n, int m) {
 // [[circuit]] array<int, 2*N> main_circuit([[private_input]] array<int, N> a_input, int n, int M) {
     array<int, N> a_input = {1, 2, 3, 4};
 
     // __builtin_assigner_exit_check(a_input.size() == n);
     // __builtin_assigner_exit_check(n == N);
+    // __builtin_assigner_exit_check(m == M);
     // __builtin_assigner_exit_check(is_power_of_two(n));
 
     array<cpx, N> a = {};
@@ -411,7 +434,9 @@ array<int, 8> complex2int(array<C, N> a) { // N * 2 == 8
         // std::cout << a[i].real.value << " " << a[i].imag.value << std::endl;
     }
 
-    // array<C, N> res = specialFFT<N>(a);
+    array<C, N> b = specialFFT<N>(a);
+    // array<C, N> c = specialIFFT<N>(b);
+    // array<int, 2*N> output = complex2int<N>(c);
     array<int, 2*N> output = complex2int<N>(a);
 
     return output;
