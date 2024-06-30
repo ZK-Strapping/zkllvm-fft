@@ -1,15 +1,14 @@
 #include <array>
 // #include <cmath>
 // #include <cassert>
-
-#include <nil/crypto3/algebra/curves/pallas.hpp>
-#include <cstdint>  
+#include <cstdint>
+#include <iostream>
 
 using namespace std;
-typedef nil::crypto3::algebra::curves::pallas::base_field_type::value_type Fr;
 
 // N
 const int N = 4;
+const int M = 8;
 const int number_of_bits = 2;
 
 /// Integer
@@ -216,39 +215,40 @@ cpx cpx_powi(cpx self, int exp) {
 
 
 R sin_taylor(R x) {
-    R result (0.0);
+    R result = fp_from_direct(0);
     int sign = 1;
     for (int n=0; n<PRECISION; n++) {
-        R term = R::from(sign) * x.powi(2*n+1) / factorial(2*n+1);
-        result = result + term;
+        R term = fp_mul(fp_from(sign), fp_powi(x, 2*n+1));
+        term = fp_div(term, factorial(2*n+1));
+        result = fp_add(result, term);
         sign *= -1;
     }
     return result;
 }
 
 R cos_taylor(R x) {
-    R result (0.0);
+    R result = fp_from_direct(0);
     int sign = 1;
     for (int n=0; n<PRECISION; n++) {
-        R term = R::from(sign) * x.powi(2*n) / factorial(2*n);
-        result = result + term;
+        R term = fp_mul(fp_from(sign), fp_powi(x, 2*n));
+        term = fp_div(term, factorial(2*n));
+        result = fp_add(result, term);
         sign *= -1;
     }
     return result;
 }
 
 // #define M_PI 3.14159265358979323846
-C find_mth_root_of_unity(int m) {
+C find_mth_root_of_unity(int m) { // m = 8
     // R ang = R::from((float)M_PI * 2 / m);
-    R ang = R::from(4 * 2 / m);
-    C zeta (cos_taylor(ang), sin_taylor(ang));
+    R ang = fp_from(1);
+    C zeta = cpx_from_fp(cos_taylor(ang), sin_taylor(ang));
     return zeta;
 }
 
 bool is_power_of_two(int n) {
     return (n & (n - 1)) == 0;
 }
-*/
 
 // int number_of_bits(int n) {
 //     int count = 0;
@@ -262,16 +262,15 @@ bool is_power_of_two(int n) {
 int bit_reverse_value(int x) {
     int r = 0;
     for (int i = 0; i < number_of_bits; i++) {
-        r <<= 1;
+        r = r * 2;
         r |= x & 1;
-        x >>= 1;
+        x = div_int(x, 2);
     }
     return r;
 }
 
 template<size_t N>
 array<C, N> get_bit_reverse_array(const array<C, N> a) {
-    __builtin_assigner_exit_check(is_power_of_two(N));
 
     array<C, N> r = {};
     for (int i = 0; i < N; i++) {
@@ -281,17 +280,16 @@ array<C, N> get_bit_reverse_array(const array<C, N> a) {
 
     return r;
 }
-*/
 
 
 template<size_t N>
-array<C, N> get_psi_powers(int m) {
+array<C, M + 1> get_psi_powers() {
     // m^th primitive root of unity
-    C psi = find_mth_root_of_unity(m);
+    C psi = find_mth_root_of_unity(M);
     // powers of m^th primitive root of unity
-    array<C, N> psi_powers = {};
-    for (int i = 0; i <= m; i++) {
-        psi_powers[i] = psi.powi(i);
+    array<C, M + 1> psi_powers = {};
+    for (int i = 0; i <= M; i++) {
+        psi_powers[i] = cpx_powi(psi, i);
     }
 
     return psi_powers;
@@ -313,24 +311,27 @@ array<int, N> get_rot_group(int N_half, int M) {
 
 template <size_t N>
 // [[circuit]] array<C, N> specialFFT([[private_input]] array<int, N> a_input, int n, int M) {
-array<C, N> specialFFT(array<C, N> a, int n, int M) {
+array<C, N> specialFFT(array<C, N> a) {
+    cout << "pass" << "\n";
     array<C, N> b = get_bit_reverse_array(a);
-    array<C, N> psi_powers = get_psi_powers<N>(M);
-    array<int, N> rot_group = get_rot_group<N>(M >> 2, M);
-
+    cout << "pass" << "\n";
+    array<C, M + 1> psi_powers = get_psi_powers<M + 1>(); // 9, 8
+    cout << "pass" << "\n";
+    array<int, N> rot_group = get_rot_group<N>(M >> 2, M); // 2, 8
+    cout << "pass" << "\n";
     int length_n = 2;
-    while (length_n <= n) {
-        for (int i = 0; i < n; i += length_n) {
+    while (length_n <= N) {
+        for (int i = 0; i < N; i += length_n) {
             int lenh = length_n >> 1;
             int lenq = length_n << 2;
-            int gap = M / lenq;
+            int gap = div_int(M, lenq);
             for (int j = 0; j < lenh; j++) {
                 int idx = (rot_group[j] % lenq) * gap;
                 C u = b[i + j];
                 C v = b[i + j + lenh];
-                v = v * psi_powers[idx];
-                b[i + j] = u + v;
-                b[i + j + lenh] = u - v;
+                v = cpx_mul(v, psi_powers[idx]);
+                b[i + j] = cpx_add(u, v);
+                b[i + j + lenh] = cpx_sub(u, v);
             }
         }
         length_n *= 2;
@@ -340,38 +341,41 @@ array<C, N> specialFFT(array<C, N> a, int n, int M) {
 }
 
 template<size_t N>
-array<C, N> specialIFFT(const array<C, N> a, int n, int M) {
-    __builtin_assigner_exit_check(a.size() == n);
-    __builtin_assigner_exit_check(is_power_of_two(n));
+array<C, N> specialIFFT(const array<C, N> a) {
+    // __builtin_assigner_exit_check(a.size() == n);
+    // __builtin_assigner_exit_check(is_power_of_two(n));
 
     array<C, N> b = a;
 
-    int length_n = n;
+    int length_n = N;
     array<C, N> psi_powers = get_psi_powers<N>(M);
     array<int, N> rot_group = get_rot_group<N>(M >> 2, M);
 
+    int cnt = 0;
     while (length_n >= 1) {
-        for (int i = 0; i < n; i += length_n) {
+        cnt++;
+        for (int i = 0; i < N; i += length_n) {
             int lenh = length_n >> 1;
             int lenq = length_n << 2;
-            int gap = M / lenq;
+            int gap = div_int(M, lenq);
             for (int j = 0; j < lenh; j++) {
                 int idx = (lenq - (rot_group[j] % lenq)) * gap;
-                C u = b[i + j] + b[i + j + lenh];
-                C v = b[i + j] - b[i + j + lenh];
-                v = v * psi_powers[idx];
+                C u = cpx_add(b[i + j], b[i + j + lenh]);
+                C v = cpx_sub(b[i + j], b[i + j + lenh]);
+                v = cpx_mul(v, psi_powers[idx]);
                 b[i + j] = u;
                 b[i + j + lenh] = v;
             }
         }
         length_n >>= 1;
     }
+    cout << cnt << "\n";
 
     b = get_bit_reverse_array(b);
 
     // multiply by 1/n and return
-    for (int i = 0; i < n; i++) {
-        b[i] /= n;
+    for (int i = 0; i < N; i++) {
+        b[i] = cpx_div(b[i], cpx_from_fp(fp_from(N), fp_from(0)));
     }
 
     return b;
@@ -381,8 +385,9 @@ array<C, N> specialIFFT(const array<C, N> a, int n, int M) {
 /// Circuit
 #include <iostream>
 
-array<int, 2*N> complex2int(array<C, N> a, int n) {
-    array<int, 2*N> r = {};
+template<size_t N>
+array<int, 8> complex2int(array<C, N> a) { // N * 2 == 8
+    array<int, N*2> r = {};
     for (int i = 0; i < N; i++) {
         r[2*i] = fp_to_int(a[i].real);
         r[2*i+1] = fp_to_int(a[i].imag);
@@ -392,7 +397,7 @@ array<int, 2*N> complex2int(array<C, N> a, int n) {
     return r;
 }
 
-[[circuit]] array<int, 2*N> main_circuit(int n, int M) {
+[[circuit]] array<int, 2*N> main_circuit(int n) {
 // [[circuit]] array<int, 2*N> main_circuit([[private_input]] array<int, N> a_input, int n, int M) {
     array<int, N> a_input = {1, 2, 3, 4};
 
@@ -406,8 +411,8 @@ array<int, 2*N> complex2int(array<C, N> a, int n) {
         // std::cout << a[i].real.value << " " << a[i].imag.value << std::endl;
     }
 
-    array<C, N> res = specialFFT<N>(a, n, M);
-    array<int, 2*N> output = complex2int<N>(res, n);
+    // array<C, N> res = specialFFT<N>(a);
+    array<int, 2*N> output = complex2int<N>(a);
 
     return output;
 }

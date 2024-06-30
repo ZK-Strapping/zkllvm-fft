@@ -409,11 +409,11 @@ int main() {
     array<cpx, N> a = {};
     for (int i = 0; i < N; i++) {
         a[i] = cpx_from(a_input[i], 0);
-        std::cout << a[i].real.value << " " << a[i].imag.value << std::endl;
+        // std::cout << a[i].real.value << " " << a[i].imag.value << std::endl;
     }
 
-    array<C, N> res = specialFFT<N>(a, n, M);
-    array<int, 2*N> output = complex2int<N>(res, n);
+    array<C, N> res = specialFFT<N>(a);
+    array<int, 2*N> output = complex2int<N>(res);
 
     return 0;
 }
