@@ -132,6 +132,7 @@ FixedPoint mux_fp(int cond, FixedPoint a, FixedPoint b) {
     return cond ? a : b;
 }
 
+/*
 FixedPoint fp_powi(FixedPoint self, int exp) {
     FixedPoint res = fp_from(1);
     FixedPoint id = fp_from(1);
@@ -142,7 +143,6 @@ FixedPoint fp_powi(FixedPoint self, int exp) {
     }
     return res;
 }
-
 // factorial list
 array<int, 11> factorial_list = {1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880,
                                           3628800, };
@@ -150,7 +150,7 @@ array<int, 11> factorial_list = {1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880,
 FixedPoint factorial(size_t n) {
     return fp_from(factorial_list[n]);
 }
-
+*/
 
 // # of iteration for taylor series 
 const int PRECISION = 10;
@@ -206,7 +206,7 @@ cpx mux_cpx(int cond, cpx a, cpx b) {
     // return cpx_from_fp(mux_fp(cond, a.real, b.real), mux_fp(cond, a.imag, b.imag));
     return cond ? a : b;
 }
-
+/*
 cpx cpx_powi(cpx self, int exp) {
     cpx res = cpx_from(1, 0);
     cpx id = cpx_from(1, 0);
@@ -217,6 +217,7 @@ cpx cpx_powi(cpx self, int exp) {
     }
     return res;
 }
+*/
 
 // typedef FixedPoint R;
 #define R FixedPoint
@@ -302,8 +303,11 @@ array<C, M + 1> get_psi_powers() {
     C psi = find_mth_root_of_unity(M);
     // powers of m^th primitive root of unity
     array<C, M + 1> psi_powers = {};
+
+    C curr = cpx_from(1, 0);
     for (int i = 0; i <= M; i++) {
-        psi_powers[i] = cpx_powi(psi, i);
+        psi_powers[i] = curr;
+        curr = cpx_mul(curr, psi);
     }
 
     return psi_powers;
@@ -311,7 +315,7 @@ array<C, M + 1> get_psi_powers() {
 
 template<size_t N>
 array<int, N> get_rot_group() {
-    int p = 1;
+    uint32_t p = 1;
     array<int, N> rot_group = {};
     for (int i = 0; i < N_half; i++) {
         rot_group[i] = p;
@@ -334,22 +338,22 @@ array<C, N> specialFFT(array<C, N> a) {
     array<int, N> rot_group = get_rot_group<N>(); // 2, 8
     // cout << "pass" << "\n";
     
-    int length_n = 2;
+    uint32_t length_n = 2;
     // while (length_n <= N) {
     for (int l = 0; l < number_of_bits; l++) {
         // for (int i = 0; i < N; i += length_n) {
         for (int i = 0; i < N; i++) {
-            int lenh = length_n >> 1;
-            int lenq = length_n << 2;
-            int gap = (uint32_t)M / lenq;
+            uint32_t lenh = length_n >> 1;
+            uint32_t lenq = length_n << 2;
+            uint32_t gap = (uint32_t)M / lenq;
             // for (int j = 0; j < lenh; j++) {
             for (int j = 0; j < N / 2; j++) {
                 int cond = (i % length_n == 0) && (j < lenh);
                 // int index1 = cond ? i + j : 0;
-                int index1 = cond * (i + j);
-                int index2 = cond * (i + j + lenh);
+                size_t index1 = cond * (i + j);
+                size_t index2 = cond * (i + j + lenh);
 
-                int idx = (rot_group[j] % lenq) * gap;
+                uint32_t idx = (rot_group[j] % lenq) * gap;
                 C u = b[index1];
                 C v = b[index2];
                 v = cpx_mul(v, psi_powers[idx]);
