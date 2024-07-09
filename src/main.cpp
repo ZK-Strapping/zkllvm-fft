@@ -139,7 +139,7 @@ struct cpx {
     FixedPoint imag;
 };
 
-cpx cpx_from(int real, int imag) {
+cpx cpx_from(uint real, uint imag) {
     cpx res;
     res.real = fp_from(real);
     res.imag = fp_from(imag);
@@ -167,6 +167,10 @@ cpx cpx_mul(cpx self, cpx other) {
                        fp_add(fp_mul(self.real, other.imag), fp_mul(self.imag, other.real)));
 }
 
+cpx cpx_mul_scalar(cpx self, FixedPoint scalar) {
+    return cpx_from_fp(fp_mul(self.real, scalar), fp_mul(self.imag, scalar));
+}
+
 cpx cpx_div(cpx self, cpx other) {
     FixedPoint denominator = fp_add(fp_mul(other.real, other.real), fp_mul(other.imag, other.imag));
     if (denominator.value == 0) {
@@ -178,6 +182,10 @@ cpx cpx_div(cpx self, cpx other) {
     FixedPoint real = fp_add(fp_mul(self.real, other.real), fp_mul(self.imag, other.imag));
     FixedPoint imag = fp_sub(fp_mul(self.imag, other.real), fp_mul(self.real, other.imag));
     return cpx_from_fp(fp_div(real, denominator), fp_div(imag, denominator));
+}
+
+cpx cpx_div_scalar(cpx self, FixedPoint scalar) {
+    return cpx_from_fp(fp_div(self.real, scalar), fp_div(self.imag, scalar));
 }
 
 cpx mux_cpx(int cond, cpx a, cpx b) {
@@ -290,9 +298,9 @@ array<C, M + 1> get_psi_powers() {
 }
 
 template<size_t N>
-array<uint, N> get_rot_group() {
+array<uint32_t, N> get_rot_group() {
     uint32_t p = 1;
-    array<uint, N> rot_group = {};
+    array<uint32_t, N> rot_group = {};
     for (int i = 0; i < N_half; i++) {
         rot_group[i] = p;
         p *= 5;
@@ -308,7 +316,7 @@ template <size_t N>
 array<C, N> specialFFT(array<C, N> a) {
     array<C, N> b = get_bit_reverse_array(a);
     array<C, M + 1> psi_powers = get_psi_powers(); // 9, 8
-    array<uint, N> rot_group = get_rot_group<N>(); // 2, 8
+    array<uint32_t, N> rot_group = get_rot_group<N>(); // 2, 8
     
     uint32_t length_n = 2;
     // while (length_n <= N) {
@@ -338,33 +346,36 @@ array<C, N> specialFFT(array<C, N> a) {
 
     return b;
 }
-/*
+
 template<size_t N>
 array<C, N> specialIFFT(const array<C, N> a) {
     // __builtin_assigner_exit_check(a.size() == n);
     // __builtin_assigner_exit_check(is_power_of_two(n));
 
     array<C, N> b = a;
-
-    int length_n = N;
     array<C, M+1> psi_powers = get_psi_powers();
-    array<int, N> rot_group = get_rot_group<N>();
+    array<uint32_t, N> rot_group = get_rot_group<N>();
 
-    // int cnt = 0;
+    uint32_t length_n = N;
     // while (length_n >= 1) {
-    for (int l = 0; l <= number_of_bits; l++) { // TODO: check why # iterations is one more than FFT
-        // cnt++;
-        for (int i = 0; i < N; i += length_n) {
-            int lenh = length_n >> 1;
-            int lenq = length_n << 2;
-            int gap = div_int(M, lenq);
-            for (int j = 0; j < lenh; j++) {
-                int idx = (lenq - (rot_group[j] % lenq)) * gap;
-                C u = cpx_add(b[i + j], b[i + j + lenh]);
-                C v = cpx_sub(b[i + j], b[i + j + lenh]);
+    for (int l = 0; l < number_of_bits; l++) {
+        // for (int i = 0; i < N; i += length_n) {
+        for (int i = 0; i < N; i++) {
+            uint32_t lenh = length_n >> 1;
+            uint32_t lenq = length_n << 2;
+            uint32_t gap = M / lenq;
+            // for (int j = 0; j < lenh; j++) {
+            for (int j = 0; j < N / 2; j++) {
+                uint32_t cond = (i % length_n == 0) && (j < lenh);
+                uint32_t index1 = cond * (i + j);
+                uint32_t index2 = cond * (i + j + lenh);
+
+                uint32_t idx = (lenq - (rot_group[j] % lenq)) * gap;
+                C u = cpx_add(b[index1], b[index2]);
+                C v = cpx_sub(b[index1], b[index2]);
                 v = cpx_mul(v, psi_powers[idx]);
-                b[i + j] = u;
-                b[i + j + lenh] = v;
+                b[index1] = cond ? u : b[index1];
+                b[index2] = cond ? v : b[index2];
             }
         }
         length_n >>= 1;
@@ -374,18 +385,17 @@ array<C, N> specialIFFT(const array<C, N> a) {
     b = get_bit_reverse_array(b);
 
     // multiply by 1/n and return
+    R n = fp_from_sign(1, N);
     for (int i = 0; i < N; i++) {
-        b[i] = cpx_div(b[i], cpx_from_fp(fp_from(N), fp_from(0)));
+        b[i] = cpx_div_scalar(b[i], n);
     }
 
     return b;
 }
-*/
 
-/// Circuit
 template<size_t N>
-array<int, 8> complex2int(array<C, N> a) { // N * 2 == 8
-    array<int, N*2> r = {};
+array<int, 2*N> complex2int(array<C, N> a) {
+    array<int, 2*N> r = {};
     for (int i = 0; i < N; i++) {
         r[2*i] = fp_to_int(a[i].real);
         r[2*i+1] = fp_to_int(a[i].imag);
@@ -395,8 +405,9 @@ array<int, 8> complex2int(array<C, N> a) { // N * 2 == 8
     return r;
 }
 
-// [[circuit]] array<int, 2*N> main_circuit(int n, int m) {
+/// Circuit
 [[circuit]] auto main_circuit([[private_input]] array<int, N> a_input, int n, int m) {
+// [[circuit]] array<int, 2*N> main_circuit(int n, int m) {
     // array<int, N> a_input = {1, 2, 3, 4};
 
     __builtin_assigner_exit_check(a_input.size() == n);
@@ -411,9 +422,9 @@ array<int, 8> complex2int(array<C, N> a) { // N * 2 == 8
     }
 
     array<C, N> b = specialFFT<N>(a);
-    // array<C, N> c = specialIFFT<N>(b);
-    // array<int, 2*N> output = complex2int<N>(c);
-    array<int, 2*N> output = complex2int<N>(a);
+    array<C, N> c = specialIFFT<N>(b);
+    array<int, 2*N> output = complex2int<N>(c);
+    // array<int, 2*N> output = complex2int<N>(a);
 
     return output;
 }
